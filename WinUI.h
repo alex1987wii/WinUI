@@ -30,8 +30,8 @@ typedef struct _wnd_tree_t{
 	int nHeight;
 	WORD wChildCnt;
 	WORD wMessageNodeCnt;
-	struct _wnd_tree_t *pChildList;/*child window list,dynamic alloc when it's needed,and free memory by this lib,but need programer to malloc the memory*/
-	struct _message_node_t *pMessageNodeList;/*message node list,memory mangament is same as child window list.*/
+	struct _wnd_tree_t **pChildList;/*child window list,dynamic alloc when it's needed,and free memory by this lib,but need programer to malloc the memory*/
+	struct _message_node_t **pMessageNodeList;/*message node list,memory mangament is same as child window list.*/
 
 }wnd_tree_t;
 
@@ -45,7 +45,7 @@ typedef struct _wnd_tree_t{
  * 	fail:NULL
  * */
 struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
-		LPCTSTR lpWindowName,DWORD dwStyle,int layoutmode,int x,int y,\
+		LPCTSTR lpWindowName,DWORD dwStyle,int iLayOutMode,int x,int y,\
 		int nWidth,int nHeight);
 
 struct _message_node_t *AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
