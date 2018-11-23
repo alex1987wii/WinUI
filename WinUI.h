@@ -2,6 +2,13 @@
 #define _WIN_UI_H_
 
 #include <windows.h>
+
+#define APP_TITLE       "Unication DevTool"
+
+/*layout mode*/
+#define LAYOUT_AUTO     0
+#define LAYOUT_MANUAL   1
+
 /*for message handler argument */
 typedef union {
 	HWND hwnd;/*reference when WM_COMMAND message occur*/
@@ -48,5 +55,5 @@ struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
 		LPCTSTR lpWindowName,DWORD dwStyle,int iLayOutMode,int x,int y,\
 		int nWidth,int nHeight);
 
-struct _message_node_t *AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
+BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
 #endif
