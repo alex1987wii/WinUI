@@ -3,6 +3,12 @@
 
 #include <windows.h>
 
+/*DEBUG MACRO*/
+/*
+*	NDEBUG:this macro disable debug code
+*	DYNAMIC_CHECK:this macro enable dynamic check
+*/
+
 #define APP_TITLE       "Unication DevTool"
 
 /*layout mode*/
@@ -51,9 +57,9 @@ typedef struct _wnd_tree_t{
  * 	success: pointer of wnd_tree_t which just added
  * 	fail:NULL
  * */
-struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
-		LPCTSTR lpWindowName,DWORD dwStyle,int iLayOutMode,int x,int y,\
+struct _wnd_tree_t *AddWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
+		LPCTSTR lpWindowName,DWORD dwStyle,int x,int y,\
 		int nWidth,int nHeight);
-
+struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
 BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
 #endif

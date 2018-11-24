@@ -16,7 +16,7 @@
 #ifdef DEBUG
 #include <assert.h>
 #define WIN_DEBUG(fmt,args...)      do{TCHAR msg_buf[1024];\
-    snprintf(msg_buf,1024,TEXT("%s:%d:")fmt,__func__,__LINE__,##args);\
+    snprintf(msg_buf,1024,TEXT("%s:%s:%d:")fmt,__FILE__,__func__,__LINE__,##args);\
     MessageBox(NULL,msg_buf,TEXT("WIN_DEBUG"),MB_OK);}while(0)      
 #else
 #define WIN_DEBUG(fmt,args...)
@@ -25,10 +25,28 @@ HWND hwndMain;
 HINSTANCE hInst;
 struct _wnd_tree_t *WndRoot = NULL;/*WndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
 BOOL InitApplication(void);
-struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
-            LPCTSTR lpWindowName,DWORD dwStyle,int iLayOutMode,\
+
+/*unitils*/
+static inline BOOL is_message_code_exsit(struct _wnd_tree_t *window,message_code_t message_code)
+{
+	/*forbid to pass NULL for window*/ 
+	assert(window);
+	WORD i;
+	for(i = 0; i < window->wMessageNodeCnt; ++i)
+	{
+		/*if message_handler is NULL,we also return FALSE,let it override*/
+		if(message_code == window->pMessageNodeList[i]->message_code && window->pMessageNodeList[i]->message_handler != NULL)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/*this function will alloc memory for child window,if parent is NULL,and you have no plan to link it in WndRoot tree,you should free the memory by yourself*/
+struct _wnd_tree_t *AddWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
+            LPCTSTR lpWindowName,DWORD dwStyle,\
             int x,int y,int nWidth,int nHeight)
 {
+#if 0	/*use another WndTree Structure which is nothing about WndRoot,WndRoot should init in InitApplication/InitWndRoot*/
     /*initialize WndRoot*/
     if(parent == NULL && WndRoot == NULL){
         WndRoot = (struct _wnd_tree_t*)malloc(sizeof(struct _wnd_tree_t));
@@ -42,9 +60,10 @@ struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
         WndRoot->nWidth = GetSystemMetric(SM_CXSCREEN);
         WndRoot->nHeight = GetSystemMetric(SM_CYSCREEN);
 
-    }
+    }	
     if(parent == NULL)
         parent = WndRoot;
+#endif
     /*malloc and init child window*/
     struct _wnd_tree_t *pChildWnd = (struct _wnd_tree_t *)malloc(sizeof(struct _wnd_tree_t));
     if(pChildWnd == NULL){
@@ -56,39 +75,55 @@ struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
     pChildWnd->lpClassName = lpClassName;
     pChildWnd->lpWindowName = lpWindowName;
     pChildWnd->dwStyle = dwStyle;
-#warning "bug here"
-    if(iLayOutMode == LAYOUT_MANUAL){
-        pChildWnd->Flags |= LAYOUT_MANUAL;
-    }
-    else if(iLayOutMode != LAYOUT_AUTO){
-        ERROR_MESSAGE("Unregnize Layout Option!");
-        assert(FALSE);
-    }
+	/*removed layout option*/
     pChildWnd->x = x;
     pChildWnd->y = y;
     pChildWnd->nWidth = nWidth;
     pChildWnd->nHeight = nHeight;
-   
-    /*malloc and copy child list,release old memory*/
-    /*it should be replace by realloc£¬that will be much easier*/
-    struct _wnd_tree_t **pChildList= (struct _wnd_tree_t **)malloc((parent->wChildCnt+1) * sizeof(struct _wnd_tree_t*));
-    if(pChildList == NULL){
-        ERROR_MESSAGE("tmp ChildList alloc failed!");
-        free(pChildWnd);
-        return NULL;
-    }
-    memcpy(pChildList,parent->pChildList,parent->wChildCnt*sizeof(long));
-    pChildList[parent->wChildCnt] = pChildWnd;
-    free(parent->pChildList);
-    parent->pChildList = pChildList;
-    ++parent->wChildCnt;
+	/*if parent is NULL,return pChildWnd directly.otherwise,link pChildWnd in parent*/
+    if(parent){
+		/*malloc and copy child list,release old memory*/				
+		struct _wnd_tree_t **pChildList = (struct _wnd_tree_t **)realloc(parent->pChildList,(parent->wChildCnt+1)*sizeof(struct _wnd_tree_t*));
+		if(pChildList == NULL){
+			WIN_DEBUG("tmp ChildList alloc failed!");
+			free(pChildWnd);
+			return NULL;
+		}
+		parent->pChildList = pChildList;
+		parent->pChildList[parent->wChildCnt++] = pChildWnd;
+	}
     return pChildWnd;
+}
+
+struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child)
+{
+	if(parent == NULL || child == NULL)
+		return child;
+	struct _wnd_tree_t **pChildList = (struct _wnd_tree_t **)realloc(parent->pChildList,(parent->wChildCnt+1)*sizeof(struct _wnd_tree_t*));
+	if(pChildList == NULL){
+		WIN_DEBUG("tmp ChildList alloc failed!");		
+		return NULL;
+	}
+	parent->pChildList = pChildList;
+	parent->pChildList[parent->wChildCnt++] = child;
+	return child;
 }
 
 BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler)
 {
-    /*window should never be NULL*/
-    assert(window);
+	/*check if this window already have the handler for message_code*/
+	/*this can be disabled when release and you ensure not invoke AddMessageHandler after application init complete*/
+#if (!defined(NDEBUG) || !defined(DYNAMIC_CHECK))
+	if(window == NULL){
+		WIN_DEBUG("window can't be NULL!",message_code);
+		return FALSE;
+	}
+	if(is_message_code_exsit(window,message_code)){
+		WIN_DEBUG("message code:%u already exsit!",message_code);
+		return FALSE;
+	}
+#endif
+	
     struct _message_node_t *message_node = (struct _message_node_t *)malloc(sizeof(struct _message_node_t));
     if(message_node == NULL){
         WIN_DEBUG("message_node alloc failed!");
@@ -107,6 +142,7 @@ BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,me
     return TRUE;
 }
 /*generally,you should pass WndRoot to window*/
+#if 0
 BOOL WndAutoLayout(struct _wnd_tree_t *window)
 {
     /*this function should invoke after WndRoot init*/
@@ -131,7 +167,7 @@ BOOL WndAutoLayout(struct _wnd_tree_t *window)
     return TRUE;
 
 }
-
+#endif
 BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
 {
     //assert(root && !strcmp(root->lpClassName,APP_TITLE));
@@ -170,13 +206,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
         MessageBox(NULL, TEXT ("InitApplication failed!"), APP_TITLE, MB_ICONERROR);        
         return 0;
     }
-	
+	#warning "bug here"
+	/* Register WndClass*/
+#if 0
 	/*auto layout*/
 	if (WndAutoLayout(WndRoot) == FALSE)
     {
         MessageBox(NULL, TEXT ("WndAutoLayout failed!"), APP_TITLE, MB_ICONERROR);        
         return 0;
     }
+#endif
 	/*Create WinMain Tree*/
 	if(CreateWndTree(WndRoot->pChildList[0],NULL) == FALSE)
 	{
