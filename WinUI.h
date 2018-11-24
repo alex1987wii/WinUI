@@ -16,7 +16,7 @@ typedef union {
 }message_handler_arg_t;
 
 /*for message handler*/
-typedef BOOL (message_handler_t)(message_handler_arg_t);
+typedef BOOL (*message_handler_t)(message_handler_arg_t);
 typedef UINT message_code_t;
 /*for message_node*/
 typedef struct _message_node_t{

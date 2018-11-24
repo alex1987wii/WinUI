@@ -24,7 +24,7 @@
 HWND hwndMain;
 HINSTANCE hInst;
 struct _wnd_tree_t *WndRoot = NULL;/*WndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
-
+BOOL InitApplication(void);
 struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
             LPCTSTR lpWindowName,DWORD dwStyle,int iLayOutMode,\
             int x,int y,int nWidth,int nHeight)
@@ -57,12 +57,12 @@ struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
     pChildWnd->lpWindowName = lpWindowName;
     pChildWnd->dwStyle = dwStyle;
 #warning "bug here"
-    if(iLayOutMode == LAYOUT_MANUL){
-        pChildWnd->Flags |= LAYOUT_MANUL;
+    if(iLayOutMode == LAYOUT_MANUAL){
+        pChildWnd->Flags |= LAYOUT_MANUAL;
     }
     else if(iLayOutMode != LAYOUT_AUTO){
         ERROR_MESSAGE("Unregnize Layout Option!");
-        assert(false);
+        assert(FALSE);
     }
     pChildWnd->x = x;
     pChildWnd->y = y;
@@ -78,10 +78,10 @@ struct _wnd_tree_t *AddChildWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
         return NULL;
     }
     memcpy(pChildList,parent->pChildList,parent->wChildCnt*sizeof(long));
-    pChildList[pChildCnt] = pChildWnd;
+    pChildList[parent->wChildCnt] = pChildWnd;
     free(parent->pChildList);
     parent->pChildList = pChildList;
-    ++parent->pChildCnt;
+    ++parent->wChildCnt;
     return pChildWnd;
 }
 
@@ -110,11 +110,13 @@ BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,me
 BOOL WndAutoLayout(struct _wnd_tree_t *window)
 {
     /*this function should invoke after WndRoot init*/
-    assert(WndRoot);
+	assert(WndRoot);
+    if(WndRoot == NULL)
+		return FALSE;
     if(window == NULL)
       return TRUE;
     /* layout this window*/
-    if(WndRoot != window && (window->Flags & LAYOUT_MANUL) == 0){
+    if(WndRoot != window && (window->Flags & LAYOUT_MANUAL) == 0){
         //do the auto layout work
 #warning "should complete in future"
         WIN_DEBUG("not support LAYOUT_AUTO yet!");
@@ -144,7 +146,7 @@ BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
         for(i = 0; i < root->wChildCnt; ++i)
         {
             if(strcmp(root->pChildList[i]->lpClassName,APP_TITLE)){
-                WIN_DEBUG("parent-child window must have one \""APP_TITILE"\" window!Check your WinTree!");
+                WIN_DEBUG("parent-child window must have one \""APP_TITLE"\" window!Check your WinTree!");
                 exit(-1);
             }
         }
@@ -156,5 +158,46 @@ BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
     }
     return TRUE;
 }
-
-
+#warning "winmain just for test now"
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow)
+{
+	
+    MSG          msg;
+    BOOL         bRet;
+    /* Init Application*/
+	if (InitApplication() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("InitApplication failed!"), APP_TITLE, MB_ICONERROR);        
+        return 0;
+    }
+	
+	/*auto layout*/
+	if (WndAutoLayout(WndRoot) == FALSE)
+    {
+        MessageBox(NULL, TEXT ("WndAutoLayout failed!"), APP_TITLE, MB_ICONERROR);        
+        return 0;
+    }
+	/*Create WinMain Tree*/
+	if(CreateWndTree(WndRoot->pChildList[0],NULL) == FALSE)
+	{
+        MessageBox(NULL, TEXT ("CreateWndTree failed!"), APP_TITLE, MB_ICONERROR);        
+        return 0;
+    }
+    hInst = hInstance;
+	hwndMain = WndRoot->pChildList[0]->hwnd;/*assume the first child of WndRoot is the Main Window*/
+	while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0)
+    { 
+        if (bRet == -1)
+        {
+            /* handle the error and possibly exit */                   
+            MessageBox(NULL, TEXT ("GetMessage error"), APP_TITLE, MB_ICONERROR) ;
+            return -1;
+        }
+        else
+        {
+            TranslateMessage(&msg); 
+            DispatchMessage(&msg); 
+        }
+    }   
+    return msg.wParam;
+}
