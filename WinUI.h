@@ -8,6 +8,9 @@
 *	NDEBUG:this macro disable debug code
 *	DYNAMIC_CHECK:this macro enable dynamic check
 */
+#warning "maybe I should add a mutex for WndRoot"
+#warning "I should make dynamic add&del WndTree test when I complete the frame"
+#warning "I have not support Unicode yet,I should do that work after all"
 
 #define APP_TITLE       "Unication DevTool"
 
@@ -15,14 +18,16 @@
 #define LAYOUT_AUTO     0
 #define LAYOUT_MANUAL   1
 
+#if 0
 /*for message handler argument */
 typedef union {
 	HWND hwnd;/*reference when WM_COMMAND message occur*/
 	LPNMHDR pnmh;/*reference when WM_NOTIFY message occur*/	
 }message_handler_arg_t;
+#endif
 
 /*for message handler*/
-typedef BOOL (*message_handler_t)(message_handler_arg_t);
+typedef LRESULT (*message_handler_t)(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam);
 typedef UINT message_code_t;
 /*for message_node*/
 typedef struct _message_node_t{
@@ -34,6 +39,8 @@ typedef struct _message_node_t{
 typedef struct _wnd_tree_t{
 	HWND hwnd;
 	int Flags;/*for layout : AUTO or MANUAL*/
+	DWORD dwExStyle;
+	struct _wnd_tree_t *parent;/*this member can speed GetParentWnd up,also can prevent mutiple invoke AddWndTree by same child*/
 	LPCTSTR lpClassName;
 	LPCTSTR lpWindowName;
 	DWORD dwStyle;
@@ -57,9 +64,10 @@ typedef struct _wnd_tree_t{
  * 	success: pointer of wnd_tree_t which just added
  * 	fail:NULL
  * */
-struct _wnd_tree_t *AddWnd(struct _wnd_tree_t *parent,LPCTSTR lpClassName,\
+struct _wnd_tree_t *AddWnd(struct _wnd_tree_t *parent,DWORD dwExStyle,LPCTSTR lpClassName,\
 		LPCTSTR lpWindowName,DWORD dwStyle,int x,int y,\
 		int nWidth,int nHeight);
 struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
+
 BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
 #endif
