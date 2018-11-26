@@ -171,13 +171,21 @@ static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
     root->hwnd = CreateWindowEx(root->dwExStyle,root->lpClassName,root->lpWindowName,root->dwStyle,
 			root->x,root->y,root->nWidth,root->nHeight,parent,NULL,hInst,NULL);
     WORD i;
+#ifndef NDEBUG
+    if(root->lpClassName == NULL || root->lpWindowName == NULL)
+    {
+	    WIN_DEBUG("lpClassName and lpWindowName Can't be NULL!");
+	    exit(-1);
+    }
+#endif
+
 #if (!defined(NDEBUG) || defined(DYNAMIC_CHECK))
     /*this just for WndTree check*/
     if(strcmp(root->lpClassName,APP_TITLE)){
         for(i = 0; i < root->wChildCnt; ++i)
         {
             if(strcmp(root->pChildList[i]->lpClassName,APP_TITLE)){
-                WIN_DEBUG("parent-child window must have one \""APP_TITLE"\" window!Check your WinTree!");
+                WIN_DEBUG("parent-child window must have one \""APP_TITLE"\" window!Check your WndTree!");
                 return FALSE;
             }
         }
@@ -223,9 +231,9 @@ LRESULT CALLBACK MainWndProc(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 		WORD i;
 		for(i = 0; i < window->wMessageNodeCnt; ++i)
 		{
-			if(window->pMessageNodeList[i]->message_code == message)
+			if(window->pMessageNodeList[i].message_code == message)
 			{
-				handler = window->pMessageNodeList[i]->message_handler;
+				handler = window->pMessageNodeList[i].message_handler;
 				if(handler)
 					return (handler)(hwnd,message,wParam,lParam);
 				else/*message_handler is NULL for placehold*/
@@ -253,14 +261,20 @@ LRESULT CALLBACK OnNotify(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 }
 BOOL InitWndRoot(void)
 {
+	#warning "unfinished"
 	struct _wnd_tree_t *p_ret = NULL;
 	DECLARE_WND_TREE(root);
-	p_ret = AddWndTree(NULL,root);
+	p_ret = AddWndTree(NULL,&root);
 	if(p_ret == NULL)
 		goto error_WndRoot;
 	WndRoot = p_ret;
 	DECLARE_WND_TREE(mainWnd);
-	p_ret = AddWndTree(WndRoot,mainWnd);
+	mainWnd.lpClassName = APP_TITLE;
+	mainWnd.lpWindowName = APP_TITLE;
+	mainWnd.nHeight = DEV_TOOLS_HEIGHT;
+	mainWnd.nWidth = DEV_TOOLS_WIDTH;
+
+	p_ret = AddWndTree(WndRoot,&mainWnd);
 	if(p_ret == NULL)
 		goto error_WndMain;
 	WndMain = p_ret;
