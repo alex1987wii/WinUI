@@ -1,32 +1,16 @@
 
 #include "WinUI.h"
 
-#define INFO_MESSAGE(fmt,args...)   do{TCHAR msg_buf[1024];\
-    snprintf(msg_buf,1024,fmt,##args);\
-    MessageBox(NULL,msg_buf,TEXT("Information"),MB_OK);}while(0)      
-#define WARNING_MESSAGE(fmt,args...)    do{TCHAR msg_buf[1024];\
-    snprintf(msg_buf,1024,fmt,##args);\
-    MessageBox(NULL,msg_buf,TEXT("Warning"),MB_ICONWARNING);}while(0)      
-#define ERROR_MESSAGE(fmt,args...)  do{TCHAR msg_buf[1024];\
-    snprintf(msg_buf,1024,fmt,##args);\
-    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM,NULL,GetLastError(),0,\
-                msg_buf+lstrlen(msg_buf),1024-lstrlen(msg_buf),NULL);\
-    MessageBox(NULL,msg_buf,TEXT("Error"),MB_ICONERROR);}while(0)      
-
-#ifndef NDEBUG
-#include <assert.h>
-#define WIN_DEBUG(fmt,args...)      do{TCHAR msg_buf[1024];\
-    snprintf(msg_buf,1024,TEXT("%s:%s:%d:")fmt,__FILE__,__func__,__LINE__,##args);\
-    MessageBox(NULL,msg_buf,TEXT("WIN_DEBUG"),MB_OK);}while(0)      
-#else
-#define WIN_DEBUG(fmt,args...)
-#endif
 HWND hwndMain;
 HINSTANCE hInst;
+static HANDLE g_event = NULL;    // event
+static HANDLE hMutex;  
 struct _wnd_tree_t *WndRoot = NULL;/*WndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
+struct _wnd_tree_t *WndMain = NULL;
 BOOL InitApplication(void);
 
-/*unitils*/
+/******************interface for WinTree*************************/
+
 static inline BOOL is_message_code_exsit(struct _wnd_tree_t *window,message_code_t message_code)
 {
 	/*forbid to pass NULL for window*/ 
@@ -35,93 +19,121 @@ static inline BOOL is_message_code_exsit(struct _wnd_tree_t *window,message_code
 	for(i = 0; i < window->wMessageNodeCnt; ++i)
 	{
 		/*if message_handler is NULL,we also return FALSE,let it override*/
-		if(message_code == window->pMessageNodeList[i]->message_code && window->pMessageNodeList[i]->message_handler != NULL)
+		if(message_code == window->pMessageNodeList[i].message_code && window->pMessageNodeList[i].message_handler != NULL)
 			return TRUE;
 	}
 	return FALSE;
 }
-
-/*this function will alloc memory for child window,if parent is NULL,and you have no plan to link it in WndRoot tree,you should free the memory by yourself*/
-struct _wnd_tree_t *AddWnd(struct _wnd_tree_t *parent,DWORD dwExStyle, LPCTSTR lpClassName,\
-            LPCTSTR lpWindowName,DWORD dwStyle,\
-            int x,int y,int nWidth,int nHeight)
+struct _wnd_tree_t *LinkWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child)
 {
-#if (!defined(NDEBUG) || defined(DYNAMIC_CHECK))
-	if(lpClassName == NULL || lpWindowName == NULL){
-		WIN_DEBUG("lpClassName and lpWindowName can't be NULL!");
+	if(child == NULL)
 		return NULL;
-	}
-#endif
-#if 0	/*use another WndTree Structure which is nothing about WndRoot,WndRoot should init in InitApplication/InitWndRoot*/
-    /*initialize WndRoot*/
-    if(parent == NULL && WndRoot == NULL){
-        WndRoot = (struct _wnd_tree_t*)malloc(sizeof(struct _wnd_tree_t));
-        if(WndRoot == NULL){
-            ERROR_MESSAGE("WndRoot alloc failed!");
-            exit(-1);/*if WndRoot Init failed!, can't continue anymore*/
-        }
-        memset(WndRoot,0,sizeof(struct _wnd_tree_t));
-        /*set default value,only that not zero*/
-        WndRoot->hwnd = GetDesktopWindow();
-        WndRoot->nWidth = GetSystemMetric(SM_CXSCREEN);
-        WndRoot->nHeight = GetSystemMetric(SM_CYSCREEN);
-
-    }	
-    if(parent == NULL)
-        parent = WndRoot;
-#endif
-    /*malloc and init child window*/
-    struct _wnd_tree_t *pChildWnd = (struct _wnd_tree_t *)malloc(sizeof(struct _wnd_tree_t));
-    if(pChildWnd == NULL){
-        WIN_DEBUG("ChildWnd alloc failed");
-        return NULL;/*alloc failed,just return NULL*/
-    }
-	
-    memset(pChildWnd,0,sizeof(struct _wnd_tree_t));
-	/*set default value,only that not zero*/
-	pChildWnd->dwExStyle = dwExStyle;
-	pChildWnd->parent = parent;
-    pChildWnd->lpClassName = lpClassName;
-    pChildWnd->lpWindowName = lpWindowName;
-    pChildWnd->dwStyle = dwStyle;
-	/*removed layout option*/
-    pChildWnd->x = x;
-    pChildWnd->y = y;
-    pChildWnd->nWidth = nWidth;
-    pChildWnd->nHeight = nHeight;
-	/*if parent is NULL,return pChildWnd directly.otherwise,link pChildWnd in parent*/
-    if(parent){						
-		struct _wnd_tree_t **pChildList = (struct _wnd_tree_t **)realloc(parent->pChildList,(parent->wChildCnt+1)*sizeof(struct _wnd_tree_t*));
-		if(pChildList == NULL){
-			WIN_DEBUG("tmp ChildList alloc failed!");
-			free(pChildWnd);
-			return NULL;
-		}
-		parent->pChildList = pChildList;
-		parent->pChildList[parent->wChildCnt++] = pChildWnd;
-	}
-    return pChildWnd;
-}
-/*you must had alloc memory for child,or just call AddWnd to alloc*/
-struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child)
-{
-	if(parent == NULL || child == NULL)
-		return child;
 #if (!defined(NDEBUG) || defined(DYNAMIC_CHECK))
 	if(child->parent){
-		WIN_DEBUG("child:%p can't have mutiple parent!",child);
+		WIN_DEBUG("ChildWnd:0x%p can't be mutiple parent's child!",child);
 		return NULL;
 	}
 #endif
-	struct _wnd_tree_t **pChildList = (struct _wnd_tree_t **)realloc(parent->pChildList,(parent->wChildCnt+1)*sizeof(struct _wnd_tree_t*));
-	if(pChildList == NULL){
-		WIN_DEBUG("tmp ChildList alloc failed!");		
-		return NULL;
+	if(parent)
+	{
+		struct _wnd_tree_t **ptmp = (struct _wnd_tree_t **)realloc(parent->pChildList,(parent->wChildCnt+1)*sizeof(struct _wnd_tree_t *));
+		if(ptmp == NULL)
+		{
+			WIN_DEBUG("realloc for ptmp failed!");
+			return NULL;
+		}
+		
+		parent->pChildList = ptmp;
+		parent->pChildList[parent->wChildCnt++] = child;
 	}
-	parent->pChildList = pChildList;
-	parent->pChildList[parent->wChildCnt++] = child;
+	child->parent = parent;
 	return child;
 }
+struct _wnd_tree_t *CopyWndTree(struct _wnd_tree_t *root)
+{
+	if(root == NULL)
+		return NULL;	
+	WORD i;
+	/*malloc for copy*/
+	struct _wnd_tree_t *copy = (struct _wnd_tree_t *)malloc(sizeof(struct _wnd_tree_t));
+	if(copy == NULL){
+		WIN_DEBUG("malloc for copy failed!");
+		return NULL;
+	}
+	memcpy(copy,root,sizeof(struct _wnd_tree_t));
+	if(copy->wMessageNodeCnt){
+		/*malloc for pMessageNodeList*/
+		copy->pMessageNodeList =(struct _message_node_t*)malloc(sizeof(struct _message_node_t)*copy->wMessageNodeCnt);
+		if(copy->pMessageNodeList == NULL)
+		{
+			WIN_DEBUG("malloc for pMessageNodeList failed!");
+			free(copy);
+			return NULL;
+		}
+		memcpy(copy->pMessageNodeList,root->pMessageNodeList,sizeof(struct _message_node_t)*copy->wMessageNodeCnt);
+	}
+	if(copy->wChildCnt){
+		/*malloc for pChildList*/
+		copy->pChildList =(struct _wnd_tree_t**)malloc(sizeof(struct _wnd_tree_t *)*copy->wChildCnt);
+		if(copy->pChildList == NULL)
+		{
+			WIN_DEBUG("malloc for pChildList failed!");
+			if(copy->wMessageNodeCnt)
+				free(copy->pMessageNodeList);
+			free(copy);
+			return NULL;
+		}
+		for(i = 0 ; i < copy->wChildCnt; ++i)
+		{
+			copy->pChildList[i] = CopyWndTree(root->pChildList[i]);
+			if(copy->pChildList[i] == NULL){				
+				/*DestroyWndTree will use wChildCnt to release resource,must correct it first*/
+				copy->wChildCnt = i;
+				DestroyWndTree(copy);
+				return NULL;
+			}
+			/*need reset child's parent*/
+			copy->pChildList[i]->parent = copy;
+		}
+	}
+	return copy;	
+}
+struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child)
+{
+	if(child == NULL)
+		return NULL;
+#if (!defined(NDEBUG) || defined(DYNAMIC_CHECK))
+	if(child->parent){
+		WIN_DEBUG("child:0x%p can't have mutiple parent!",child);
+		return NULL;
+	}
+#endif
+	struct _wnd_tree_t *ptmp = CopyWndTree(child);
+	if(ptmp == NULL){
+		WIN_DEBUG("CopyWndTree Failed!");
+		return NULL;
+	}
+	if(LinkWndTree(parent,ptmp) == NULL){
+		WIN_DEBUG("LinkWndTree Failed!");
+		DestroyWndTree(ptmp);
+		return NULL;
+	}
+	return ptmp;	
+}
+
+void DestroyWndTree(struct _wnd_tree_t *root)
+{
+	if(root == NULL)
+		return ;
+	WORD i;	
+	for(i = 0; i < root->wChildCnt; ++i)
+	{
+		DestroyWndTree(root->pChildList[i]);
+	}	
+	free(root->pChildList);
+	free(root->pMessageNodeList);
+	free(root);
+} 
 
 BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler)
 {
@@ -137,51 +149,20 @@ BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,me
 		return FALSE;
 	}
 #endif
-	
-    struct _message_node_t *message_node = (struct _message_node_t *)malloc(sizeof(struct _message_node_t));
-    if(message_node == NULL){
-        WIN_DEBUG("message_node alloc failed!");
-        return FALSE;
-    }
-    message_node->message_code = message_code;
-    message_node->message_handler = message_handler;
-    /*realloc message_node pointer arrary*/
-    struct _message_node_t **ptmp = (struct _message_node_t **)realloc(window->pMessageNodeList,(window->wMessageNodeCnt + 1)*sizeof(struct _message_node_t *));
+	/*realloc message_node pointer arrary*/
+    struct _message_node_t *ptmp = (struct _message_node_t *)realloc(window->pMessageNodeList,(window->wMessageNodeCnt + 1)*sizeof(struct _message_node_t));
     if(ptmp == NULL){
         WIN_DEBUG("pMessageNodeList realloc failed!");
         return FALSE;
     }
     window->pMessageNodeList = ptmp;
-    window->pMessageNodeList[window->wMessageNodeCnt++] = message_node;
+    window->pMessageNodeList[window->wMessageNodeCnt].message_code = message_code;
+	window->pMessageNodeList[window->wMessageNodeCnt].message_handler = message_handler;
+	++window->wMessageNodeCnt;
     return TRUE;
 }
-/*generally,you should pass WndRoot to window*/
-#if 0
-BOOL WndAutoLayout(struct _wnd_tree_t *window)
-{
-    /*this function should invoke after WndRoot init*/
-	assert(WndRoot);
-    if(WndRoot == NULL)
-		return FALSE;
-    if(window == NULL)
-      return TRUE;
-    /* layout this window*/
-    if(WndRoot != window && (window->Flags & LAYOUT_MANUAL) == 0){
-        //do the auto layout work
-#warning "should complete in future"
-        WIN_DEBUG("not support LAYOUT_AUTO yet!");
-        exit(-1);
-    }
-    /* layout the child window recursively*/
-    WORD i = 0;
-    for(;i < window->wChildCnt; ++i){
-        if(FALSE == WndAutoLayout(window->pChildList[i]))
-          return FALSE;
-    }
-    return TRUE;
 
-}
-#endif
+
 static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
 {
     //assert(root && !strcmp(root->lpClassName,APP_TITLE));
@@ -202,14 +183,19 @@ static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
         }
     }
 #endif
+	if(root->hwnd == NULL){
+		WIN_DEBUG("HWND:0x%x CreateWindowEx Failed!");
+		return FALSE;
+	}
     for(i = 0; i < root->wChildCnt; ++i){
         if(FALSE == CreateWndTree(root->pChildList[i],root->hwnd))
           return FALSE;
     }
     return TRUE;
 }
-#warning "this function should optimation "
-static inline struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
+
+
+static struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
 {
 	/*we had make some check before invoke*/
 	if(window->hwnd == hwnd)
@@ -217,8 +203,8 @@ static inline struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
 	struct _wnd_tree_t *child;
 	WORD i;
 	for(i = 0; i < window->wChildCnt; ++i)
-	{
-		child = GetWnd(window,hwnd);
+	{		
+		child = GetWnd(window->pChildList[i],hwnd);
 		if(child)
 			return child;
 	}
@@ -228,40 +214,127 @@ static inline struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
 LRESULT CALLBACK MainWndProc(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 {
 	message_handler_t handler;
-	struct _wnd_tree_t *window;
-	
+	struct _wnd_tree_t *window;	
 	window = GetWnd(WndRoot->pChildList[0],hwnd);/*assume the first child of WndRoot is the Main Window*/
-#if (!defined(NDEBUG) || defined(DYNAMIC_CHECK))
-	if(window == NULL){
-		WIN_DEBUG("hwnd:0x%x not found!",hwnd);
-		
-		if(hwndMain)
-			PostMessage(hwndMain,WM_QUIT,0,0);
-		else
-			exit(-1);
-	}
-#endif
-	WORD i;
-	for(i = 0; i < window->wMessageNodeCnt; ++i)
+
+	/*When WM_CREATE(some init message) comming,window will be NULL*/
+	if(window)
 	{
-		if(window->pMessageNodeList[i]->message_code == message)
+		WORD i;
+		for(i = 0; i < window->wMessageNodeCnt; ++i)
 		{
-			handler = window->pMessageNodeList[i]->message_handler;
-			if(handler)
-				return (handler)(hwnd,message,wParam,lParam);
-			else/*message_handler is NULL for placehold*/
-				return 0;				
+			if(window->pMessageNodeList[i]->message_code == message)
+			{
+				handler = window->pMessageNodeList[i]->message_handler;
+				if(handler)
+					return (handler)(hwnd,message,wParam,lParam);
+				else/*message_handler is NULL for placehold*/
+					return 0;				
+			}
 		}
 	}
 	return DefWindowProc(hwnd,message,wParam,lParam);
 }
-#warning "winmain just for test now,should re-edit later"
+
+/******************interface for DevTools*************************/
+LRESULT CALLBACK OnCommand(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+{
+	
+	WIN_DEBUG("hwnd = %u\tmessage = %u\t wParam = 0x%8x\t lParam = 0x%16x",
+	hwnd,message,wParam,lParam);
+	return 0;
+}
+LRESULT CALLBACK OnNotify(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+{
+	
+	WIN_DEBUG("hwnd = %u\tmessage = %u\t wParam = 0x%8x\t lParam = 0x%16x",
+	hwnd,message,wParam,lParam);
+	return 0;
+}
+BOOL InitWndRoot(void)
+{
+	struct _wnd_tree_t *p_ret = NULL;
+	DECLARE_WND_TREE(root);
+	p_ret = AddWndTree(NULL,root);
+	if(p_ret == NULL)
+		goto error_WndRoot;
+	WndRoot = p_ret;
+	DECLARE_WND_TREE(mainWnd);
+	p_ret = AddWndTree(WndRoot,mainWnd);
+	if(p_ret == NULL)
+		goto error_WndMain;
+	WndMain = p_ret;
+	
+	if(AddMessageHandler(WndMain,WM_COMMAND,OnCommand) == FALSE)
+		goto error_WndMain;
+	if(AddMessageHandler(WndMain,WM_NOTIFY,OnNotify) == FALSE)
+		goto error_WndMain;
+	return TRUE;
+
+error_WndMain:
+	DestroyWndTree(WndRoot);
+error_WndRoot:
+	return FALSE;
+}
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow)
 {
 	
     MSG          msg;
     BOOL         bRet;
 	hInst = hInstance;
+	/* Init WndRoot*/
+	if(InitWndRoot() == FALSE)
+	{
+		MessageBox(NULL, TEXT ("InitWndRoot error"), APP_TITLE, MB_ICONERROR);
+		return 0;
+	}
+	
+	/* Initialize debug UniDevTools */
+    if (InitDebugConsole() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("Can not init debug "APP_TITLE),APP_TITLE, MB_ICONERROR);
+        DestroyWndTree(WndRoot);
+		return 0 ;
+    }
+    
+    g_event = CreateEvent(NULL, TRUE, FALSE, NULL); // ManualReset
+
+    if (StartThread() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("Create thread error"), APP_TITLE, MB_ICONERROR);
+        ExitDebugConsole();
+		DestroyWndTree(WndRoot);
+        return 0;
+    }
+	
+    /* Application init */
+    if (InitApplication() == FALSE)
+    {
+        MessageBox(NULL, TEXT (APP_TITLE" is running"), APP_TITLE, MB_ICONERROR);
+        ExitDebugConsole();
+		DestroyWndTree(WndRoot);
+        return 0;
+    }
+
+    /* Unication Dev Tools main window init */
+    if (InitMainWindow() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("Can not create main window"), szAppName, MB_ICONERROR);
+        CloseHandle(hMutex);
+        ExitDebugConsole();
+		DestroyWndTree(WndRoot);
+        return 0;
+    }
+	
+    reset_private_flags();
+
+    /* Show the window and send a WM_PAINT message to the window procedure */
+    ShowWindow(hwndMain, iCmdShow);
+    UpdateWindow(hwndMain);
+    
+    processing = FALSE;
+    locking = FALSE;
+
 	/* layout */
 #define DEV_TOOLS_WIDTH         700         /* Unication dev tools main window width */
 #define DEV_TOOLS_HEIGHT        550         /* Unication dev tools main window height */
@@ -307,14 +380,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	#warning "bug here"
 	/* Register WndClass*/	
 	
-#if 0
-	/*auto layout*/
-	if (WndAutoLayout(WndRoot) == FALSE)
-    {
-        MessageBox(NULL, TEXT ("WndAutoLayout failed!"), APP_TITLE, MB_ICONERROR);        
-        return 0;
-    }
-#endif
+
 	
 #ifndef NDEBUG
 	if(WndRoot == NULL || WndRoot->pChildList == NULL || WndRoot->pChildList[0] == NULL){
@@ -346,6 +412,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
             TranslateMessage(&msg); 
             DispatchMessage(&msg); 
         }
-    }   
-    return msg.wParam;
+    }
+	
+	CloseHandle(g_event);
+
+    /* Receive the WM_QUIT message, release mutex and return the exit code to the system */
+    CloseHandle(hMutex);
+    ExitDebugConsole();
+
+	DestroyWndTree(WndRoot);
+	return msg.wParam;
 }
