@@ -1,12 +1,23 @@
 
 #include "WinUI.h"
+#define DEV_TOOLS_WIDTH         700         /* Unication dev tools main window width */
+#define DEV_TOOLS_HEIGHT        550         /* Unication dev tools main window height */
+#include <stdio.h>
+
+#define WAKE_THREAD_UP() do { SetEvent(g_event); } while(0)
+/* for DataTransferThread */
+HWND g_hwnd = NULL;
+UINT g_message = 0;
+WPARAM g_wParam = 0;
+LPARAM g_lParam = 0;
+message_handler_t g_handler = NULL;
 
 HWND hwndMain;
 HINSTANCE hInst;
 static HANDLE g_event = NULL;    // event
 static HANDLE hMutex;  
-struct _wnd_tree_t *WndRoot = NULL;/*WndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
-struct _wnd_tree_t *WndMain = NULL;
+struct _wnd_tree_t *pWndRoot = NULL;/*pWndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
+struct _wnd_tree_t *pWndMain = NULL;
 BOOL InitApplication(void);
 
 /******************interface for WinTree*************************/
@@ -223,7 +234,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 {
 	message_handler_t handler;
 	struct _wnd_tree_t *window;	
-	window = GetWnd(WndRoot->pChildList[0],hwnd);/*assume the first child of WndRoot is the Main Window*/
+	window = GetWnd(pWndRoot->pChildList[0],hwnd);/*assume the first child of pWndRoot is the Main Window*/
 
 	/*When WM_CREATE(some init message) comming,window will be NULL*/
 	if(window)
@@ -246,134 +257,110 @@ LRESULT CALLBACK MainWndProc(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 
 /******************interface for DevTools*************************/
 LRESULT CALLBACK OnCommand(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
-{
-	
-	WIN_DEBUG("hwnd = %u\tmessage = %u\t wParam = 0x%8x\t lParam = 0x%16x",
-	hwnd,message,wParam,lParam);
+{	
+	HWND child = (HWND)lParam;
+	if(child){
+		WORD i,j;
+		struct _wnd_tree_t *pWnd = GetWnd(pWndMain,hwnd);
+		assert(pWnd);
+		for(i = 0; i < pWnd->wChildCnt;++i)
+		{
+			if(child == pWnd->pChildList[i]->hwnd)
+			{
+				pWnd = pWnd->pChildList[i];
+				message_code_t msg_code = LOWORD(wParam);
+				for(j = 0; j < pWnd->wMessageNodeCnt; ++j)
+				{
+					if(msg_code == pWnd->pMessageNodeList[j].message_code)
+					{
+						message_handler_t handler = pWnd->pMessageNodeList[j].message_handler;
+						if(handler)
+						{
+							g_hwnd = hwnd;
+							g_message = message;
+							g_wParam = wParam;
+							g_lParam = lParam;
+							g_handler = handler;
+							WAKE_THREAD_UP();						
+							
+						}
+					}
+					break;
+				}
+				break;
+			}
+		}
+	}
 	return 0;
 }
 LRESULT CALLBACK OnNotify(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+{	
+	return 0;
+}
+LRESULT CALLBACK OnDestory(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 {
 	
 	WIN_DEBUG("hwnd = %u\tmessage = %u\t wParam = 0x%8x\t lParam = 0x%16x",
 	hwnd,message,wParam,lParam);
+	PostQuitMessage(0);
 	return 0;
 }
-BOOL InitWndRoot(void)
-{
-	#warning "unfinished"
+BOOL InitpWndRoot(void)
+{	
 	struct _wnd_tree_t *p_ret = NULL;
 	DECLARE_WND_TREE(root);
 	p_ret = AddWndTree(NULL,&root);
 	if(p_ret == NULL)
-		goto error_WndRoot;
-	WndRoot = p_ret;
+		goto error_pWndRoot;
+	pWndRoot = p_ret;
 	DECLARE_WND_TREE(mainWnd);
+	mainWnd.dwStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS;
+	mainWnd.x = (GetSystemMetrics(SM_CXSCREEN)-DEV_TOOLS_WIDTH)/2;
+	mainWnd.y = (GetSystemMetrics(SM_CYSCREEN)-DEV_TOOLS_HEIGHT)/2;
 	mainWnd.lpClassName = APP_TITLE;
 	mainWnd.lpWindowName = APP_TITLE;
 	mainWnd.nHeight = DEV_TOOLS_HEIGHT;
 	mainWnd.nWidth = DEV_TOOLS_WIDTH;
-
-	p_ret = AddWndTree(WndRoot,&mainWnd);
-	if(p_ret == NULL)
-		goto error_WndMain;
-	WndMain = p_ret;
 	
-	if(AddMessageHandler(WndMain,WM_COMMAND,OnCommand) == FALSE)
-		goto error_WndMain;
-	if(AddMessageHandler(WndMain,WM_NOTIFY,OnNotify) == FALSE)
-		goto error_WndMain;
+	p_ret = AddWndTree(pWndRoot,&mainWnd);
+	if(p_ret == NULL)
+		goto error_pWndMain;
+	pWndMain = p_ret;
+	/*add some default message handler,user alse can add message handler for pWndMain in InitApplication*/
+	if(AddMessageHandler(pWndMain,WM_COMMAND,OnCommand) == FALSE)
+		goto error_pWndMain;
+	if(AddMessageHandler(pWndMain,WM_NOTIFY,OnNotify) == FALSE)
+		goto error_pWndMain;
+	if(AddMessageHandler(pWndMain,WM_DESTROY,OnDestory) == FALSE)
+		goto error_pWndMain;
 	return TRUE;
 
-error_WndMain:
-	DestroyWndTree(WndRoot);
-error_WndRoot:
+error_pWndMain:
+	DestroyWndTree(pWndRoot);
+error_pWndRoot:
 	return FALSE;
 }
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow)
+static BOOL InitMainWindow(void)
 {
-	
-    MSG          msg;
-    BOOL         bRet;
-	hInst = hInstance;
-	/* Init WndRoot*/
-	if(InitWndRoot() == FALSE)
-	{
-		MessageBox(NULL, TEXT ("InitWndRoot error"), APP_TITLE, MB_ICONERROR);
-		return 0;
-	}
-	
-	/* Initialize debug UniDevTools */
-    if (InitDebugConsole() == FALSE)
-    {
-        MessageBox(NULL, TEXT ("Can not init debug "APP_TITLE),APP_TITLE, MB_ICONERROR);
-        DestroyWndTree(WndRoot);
-		return 0 ;
-    }
-    
-    g_event = CreateEvent(NULL, TRUE, FALSE, NULL); // ManualReset
-
-    if (StartThread() == FALSE)
-    {
-        MessageBox(NULL, TEXT ("Create thread error"), APP_TITLE, MB_ICONERROR);
-        ExitDebugConsole();
-		DestroyWndTree(WndRoot);
-        return 0;
-    }
-	
-    /* Application init */
-    if (InitApplication() == FALSE)
-    {
-        MessageBox(NULL, TEXT (APP_TITLE" is running"), APP_TITLE, MB_ICONERROR);
-        ExitDebugConsole();
-		DestroyWndTree(WndRoot);
-        return 0;
-    }
-
-    /* Unication Dev Tools main window init */
-    if (InitMainWindow() == FALSE)
-    {
-        MessageBox(NULL, TEXT ("Can not create main window"), szAppName, MB_ICONERROR);
-        CloseHandle(hMutex);
-        ExitDebugConsole();
-		DestroyWndTree(WndRoot);
-        return 0;
-    }
-	
-    reset_private_flags();
-
-    /* Show the window and send a WM_PAINT message to the window procedure */
-    ShowWindow(hwndMain, iCmdShow);
-    UpdateWindow(hwndMain);
-    
-    processing = FALSE;
-    locking = FALSE;
-
-	/* layout */
-#define DEV_TOOLS_WIDTH         700         /* Unication dev tools main window width */
-#define DEV_TOOLS_HEIGHT        550         /* Unication dev tools main window height */
-	/*init WndRoot*/
-	WndRoot = AddWnd(NULL,0,TEXT("\0"),TEXT("Desktop"),0,0,0,GetSystemMetrics(SM_CXSCREEN),GetSystemMetrics(SM_CYSCREEN));
-	if(WndRoot == NULL){
-		ERROR_MESSAGE("WndRoot Create Failed!");
-		return 0;
-	}
-	if(AddWnd(WndRoot,0,TEXT(APP_TITLE),TEXT(APP_TITLE),WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS,\
-	(WndRoot->nWidth-DEV_TOOLS_WIDTH)/2, (WndRoot->nHeight-DEV_TOOLS_HEIGHT)/2,\
-	DEV_TOOLS_WIDTH, DEV_TOOLS_HEIGHT) == NULL){
-		ERROR_MESSAGE("Main Window Create Failed!");
-		return 0;
-	}
-#warning "this section should re-edit"
-#if 0
-    /* Init Application*/
-	if (InitApplication() == FALSE)
-    {
-        MessageBox(NULL, TEXT ("InitApplication failed!"), APP_TITLE, MB_ICONERROR);        
-        return 0;
-    }
-#else
 	WNDCLASSEX     wndclass;
+    
+    /* only one instance can run on the system */
+    hMutex = CreateMutex(NULL, FALSE, APP_TITLE);
+    if(hMutex == NULL)
+    {
+        WIN_DEBUG("Create mutex error!\n");
+        return FALSE;
+    }
+        
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        CloseHandle(hMutex);
+        WIN_DEBUG(APP_TITLE" is running\n");
+        return FALSE;
+    }
+    
+    /* Register the Unication UniDevTools main window class */
+    	
 	memset(&wndclass, 0, sizeof(WNDCLASSEX));
     wndclass.cbSize        = sizeof(WNDCLASSEX);
     wndclass.style         = CS_HREDRAW | CS_VREDRAW;
@@ -388,31 +375,118 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     if (!RegisterClassEx(&wndclass))
     {        
         return FALSE;
-    }    
-    
-#endif
-	#warning "bug here"
-	/* Register WndClass*/	
-	
-
-	
-#ifndef NDEBUG
-	if(WndRoot == NULL || WndRoot->pChildList == NULL || WndRoot->pChildList[0] == NULL){
-		WIN_DEBUG("WndRoot and Main Window is not add in!");
-		exit(-1);
-	}
-#endif
-	/*Create WinMain Tree*/
-	if(CreateWndTree(WndRoot->pChildList[0],NULL) == FALSE)
+    }
+	if(CreateWndTree(pWndMain,NULL) == FALSE)
 	{
-        MessageBox(NULL, TEXT ("CreateWndTree failed!"), APP_TITLE, MB_ICONERROR);        
+		CloseHandle(hMutex);
+		WIN_DEBUG("CreateWndTree Failed!");
+		return FALSE;
+	}
+	hwndMain = pWndMain->hwnd;
+	return TRUE;
+}
+#warning "test section"
+BOOL InitApplication(void)
+{
+	DECLARE_WND_TREE(button);
+	button.lpClassName = "button";
+	button.lpWindowName = "click";
+	button.dwStyle = BS_PUSHBUTTON | WS_CHILD| WS_VISIBLE;
+	button.x = 0;
+	button.y = 0;
+	button.nWidth = 60;
+	button.nHeight = 40;
+	struct _wnd_tree_t *pButton = AddWndTree(pWndMain,&button);
+	if(pButton == NULL)
+		return FALSE;
+	button.x = 80;
+	button.y = 0;
+	button.lpWindowName = "click2";
+	pButton = AddWndTree(pWndMain,&button);
+	if(pButton == NULL)
+		return FALSE;
+	AddMessageHandler(pButton,BN_CLICKED,OnNotify);
+	return TRUE;
+}
+static DWORD WINAPI DataTransferThread(LPVOID lpParam)
+{
+    int retval = -1;
+
+    while (1)
+    {
+        WaitForSingleObject(g_event, INFINITE);
+        ResetEvent(g_event);
+		EnableWindow(hwndMain,FALSE);		
+		g_handler(g_hwnd,g_message,g_wParam,g_lParam);
+		EnableWindow(hwndMain,TRUE);		
+    }
+
+    return 0;
+}
+static BOOL StartThread(void) 
+{    
+    if (CreateThread(NULL, 0, DataTransferThread, NULL, 0, NULL) == NULL) 
+    {
+        WIN_DEBUG("create DataTransferThread error\n");        
+        return FALSE;
+    }
+    return TRUE;
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow)
+{
+	
+    MSG          msg;
+    BOOL         bRet;
+	hInst = hInstance;
+	/* Init pWndRoot*/
+	if(InitpWndRoot() == FALSE)
+	{
+		MessageBox(NULL, TEXT ("InitpWndRoot error"), APP_TITLE, MB_ICONERROR);
+		return 0;
+	}	
+    
+    g_event = CreateEvent(NULL, TRUE, FALSE, NULL); // ManualReset
+
+    if (StartThread() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("Create thread error"), APP_TITLE, MB_ICONERROR);
+        DestroyWndTree(pWndRoot);
+        return 0;
+    }	
+    /* Application init */
+    if (InitApplication() == FALSE)
+    {
+        MessageBox(NULL, TEXT (APP_TITLE" is running"), APP_TITLE, MB_ICONERROR);
+        DestroyWndTree(pWndRoot);
         return 0;
     }
-    
-	hwndMain = WndRoot->pChildList[0]->hwnd;/*assume the first child of WndRoot is the Main Window*/
+
+	/*Check pWndRoot*/
+	#warning "need check pWndRoot here"
+#ifndef NDEBUG
+	if(pWndRoot == NULL || pWndRoot->pChildList == NULL || pWndRoot->pChildList[0] == NULL || pWndMain == NULL){
+		WIN_DEBUG("pWndRoot and Main Window is not add in!");
+		exit(-1);
+	}
+#endif  	
 	
-	ShowWindow(hwndMain,iCmdShow);
-	UpdateWindow(hwndMain);
+    /* Unication Dev Tools main window init */
+    if (InitMainWindow() == FALSE)
+    {
+        MessageBox(NULL, TEXT ("Can not create main window"), APP_TITLE, MB_ICONERROR);
+        CloseHandle(hMutex);        
+		DestroyWndTree(pWndRoot);
+        return 0;
+    }
+	
+    //reset_private_flags();
+
+    /* Show the window and send a WM_PAINT message to the window procedure */
+    ShowWindow(hwndMain, iCmdShow);
+    UpdateWindow(hwndMain);
+	
+
 	while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0)
     { 
         if (bRet == -1)
@@ -431,9 +505,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	CloseHandle(g_event);
 
     /* Receive the WM_QUIT message, release mutex and return the exit code to the system */
-    CloseHandle(hMutex);
-    ExitDebugConsole();
+    CloseHandle(hMutex);   
 
-	DestroyWndTree(WndRoot);
+	DestroyWndTree(pWndRoot);
 	return msg.wParam;
 }
+
