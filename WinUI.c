@@ -137,10 +137,6 @@ void DestroyWndTree(struct _wnd_tree_t *root)
 	if(root == NULL)
 		return ;
 	WORD i;
-#ifndef NDEBUG
-	if(root->parent)
-		WIN_DEBUG("root must be root,or unlink it by yourself!");
-#endif
 	for(i = 0; i < root->wChildCnt; ++i)
 	{
 		DestroyWndTree(root->pChildList[i]);
