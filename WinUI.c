@@ -1,8 +1,10 @@
 
 #include "WinUI.h"
+#include <stdio.h>
+
 #define DEV_TOOLS_WIDTH         700         /* Unication dev tools main window width */
 #define DEV_TOOLS_HEIGHT        550         /* Unication dev tools main window height */
-#include <stdio.h>
+#define APP_TITLE       "Unication DevTool"
 
 #define WAKE_THREAD_UP() do { SetEvent(g_event); } while(0)
 /* for DataTransferThread */
@@ -19,6 +21,7 @@ static HANDLE hMutex;
 struct _wnd_tree_t *pWndRoot = NULL;/*pWndRoot start with Desktop window, the main window is also it's child,only the main window child-chain will create before message loop*/
 struct _wnd_tree_t *pWndMain = NULL;
 BOOL InitApplication(void);
+TCHAR szAppName[] = TEXT(APP_TITLE);
 
 /******************interface for WinTree*************************/
 
@@ -178,8 +181,16 @@ static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
 {
     //assert(root && !strcmp(root->lpClassName,APP_TITLE));
     if(root == NULL)
-      return TRUE;	
-    root->hwnd = CreateWindowEx(root->dwExStyle,root->lpClassName,root->lpWindowName,root->dwStyle,
+      return TRUE;
+	if(root->parent && root->nWidth == 0 && root->nHeight == 0)/*use parent's client area*/
+	{
+		 RECT        rcClient;
+		 GetClientRect(root->parent->hwnd, &rcClient);
+		 root->nWidth = rcClient.right;
+		 root->nHeight = rcClient.bottom;
+	}
+	
+	root->hwnd = CreateWindowEx(root->dwExStyle,root->lpClassName,root->lpWindowName,root->dwStyle,
 			root->x,root->y,root->nWidth,root->nHeight,parent,NULL,hInst,NULL);
     WORD i;
 #ifndef NDEBUG
@@ -205,6 +216,23 @@ static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
 	if(root->hwnd == NULL){
 		WIN_DEBUG("HWND:0x%x CreateWindowEx Failed!");
 		return FALSE;
+	}
+	if(!strcmp(root->lpClassName,WC_TABCONTROL))
+	{
+		TCITEM      tie;
+		tie.mask = TCIF_TEXT | TCIF_IMAGE;
+		tie.iImage = -1; 
+	 
+		for(i = 0; i < root->wChildCnt; i++) 
+		{
+			tie.pszText = root->pChildList[i]->lpWindowName; 
+			if(TabCtrl_InsertItem(root->hwnd, i, &tie) == -1) 
+			{ 
+				WIN_DEBUG("Add Tabs error\n");
+				return FALSE;
+			} 
+		}
+    
 	}
     for(i = 0; i < root->wChildCnt; ++i){
         if(FALSE == CreateWndTree(root->pChildList[i],root->hwnd))
@@ -294,15 +322,60 @@ LRESULT CALLBACK OnCommand(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 	return 0;
 }
 LRESULT CALLBACK OnNotify(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
-{	
+{
+	HWND child = ((LPNMHDR)lParam)->hwndFrom;
+	if(child){
+		WORD i,j;
+		struct _wnd_tree_t *pWnd = GetWnd(pWndMain,hwnd);
+		assert(pWnd);
+		for(i = 0; i < pWnd->wChildCnt;++i)
+		{
+			if(child == pWnd->pChildList[i]->hwnd)
+			{
+				pWnd = pWnd->pChildList[i];
+				message_code_t msg_code = ((LPNMHDR)lParam)->code;
+				for(j = 0; j < pWnd->wMessageNodeCnt; ++j)
+				{
+					if(msg_code == pWnd->pMessageNodeList[j].message_code)
+					{
+						message_handler_t handler = pWnd->pMessageNodeList[j].message_handler;
+						if(handler)
+						{
+							g_hwnd = hwnd;
+							g_message = message;
+							g_wParam = wParam;
+							g_lParam = lParam;
+							g_handler = handler;
+							WAKE_THREAD_UP();						
+							
+						}
+					}
+					break;
+				}
+				break;
+			}
+		}
+	}	
 	return 0;
 }
 LRESULT CALLBACK OnDestory(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
-{
-	
-	WIN_DEBUG("hwnd = %u\tmessage = %u\t wParam = 0x%8x\t lParam = 0x%16x",
-	hwnd,message,wParam,lParam);
+{	
 	PostQuitMessage(0);
+	return 0;
+}
+LRESULT CALLBACK OnSelChange(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+{	
+	HWND hwndTab = ((LPNMHDR)lParam)->hwndFrom;
+	int select = TabCtrl_GetCurSel(hwndTab);
+	struct _wnd_tree_t *pTab = GetWnd(pWndMain,hwndTab);
+	WORD i;
+	for(i = 0; i < pTab->wChildCnt; ++i)
+	{
+		if(i == select)
+			ShowWindow(pTab->pChildList[i]->hwnd,TRUE);
+		else
+			ShowWindow(pTab->pChildList[i]->hwnd,FALSE);
+	}
 	return 0;
 }
 BOOL InitpWndRoot(void)
@@ -317,8 +390,8 @@ BOOL InitpWndRoot(void)
 	mainWnd.dwStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS;
 	mainWnd.x = (GetSystemMetrics(SM_CXSCREEN)-DEV_TOOLS_WIDTH)/2;
 	mainWnd.y = (GetSystemMetrics(SM_CYSCREEN)-DEV_TOOLS_HEIGHT)/2;
-	mainWnd.lpClassName = APP_TITLE;
-	mainWnd.lpWindowName = APP_TITLE;
+	mainWnd.lpClassName = szAppName;
+	mainWnd.lpWindowName = szAppName;
 	mainWnd.nHeight = DEV_TOOLS_HEIGHT;
 	mainWnd.nWidth = DEV_TOOLS_WIDTH;
 	
@@ -385,29 +458,9 @@ static BOOL InitMainWindow(void)
 	hwndMain = pWndMain->hwnd;
 	return TRUE;
 }
+
 #warning "test section"
-BOOL InitApplication(void)
-{
-	DECLARE_WND_TREE(button);
-	button.lpClassName = "button";
-	button.lpWindowName = "click";
-	button.dwStyle = BS_PUSHBUTTON | WS_CHILD| WS_VISIBLE;
-	button.x = 0;
-	button.y = 0;
-	button.nWidth = 60;
-	button.nHeight = 40;
-	struct _wnd_tree_t *pButton = AddWndTree(pWndMain,&button);
-	if(pButton == NULL)
-		return FALSE;
-	button.x = 80;
-	button.y = 0;
-	button.lpWindowName = "click2";
-	pButton = AddWndTree(pWndMain,&button);
-	if(pButton == NULL)
-		return FALSE;
-	AddMessageHandler(pButton,BN_CLICKED,OnNotify);
-	return TRUE;
-}
+
 static DWORD WINAPI DataTransferThread(LPVOID lpParam)
 {
     int retval = -1;

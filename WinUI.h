@@ -2,7 +2,7 @@
 #define _WIN_UI_H_
 
 #include <windows.h>
-
+#include <commctrl.h>
 /*DEBUG MACRO*/
 /*
 *	NDEBUG:this macro disable debug code
@@ -12,11 +12,6 @@
 #warning "I should make dynamic add&del WndTree test when I complete the frame"
 #warning "I have not support Unicode yet,I should do that work after all"
 
-#define APP_TITLE       "Unication DevTool"
-
-/*layout mode*/
-#define LAYOUT_AUTO     0
-#define LAYOUT_MANUAL   1
 
 
 /*for message handler*/
@@ -30,9 +25,9 @@ typedef struct _message_node_t{
 
 /*for wnd_tree_t: most of the member are argments of CreateWindowEx*/
 typedef struct _wnd_tree_t{
-	HWND hwnd;	
-	DWORD dwExStyle;	
+	HWND hwnd;
 	struct _wnd_tree_t *parent;/*this member can speed GetParentWnd up,also can prevent invoke AddWndTree mutiplely by same child*/
+	DWORD dwExStyle;	
 	LPCTSTR lpClassName;
 	LPCTSTR lpWindowName;
 	DWORD dwStyle;	
@@ -66,6 +61,24 @@ typedef struct _wnd_tree_t{
 .pMessageNodeList = NULL,\
 }
 #define DECLARE_WND_TREE(name)	struct _wnd_tree_t name = WND_TREE_INIT
+#define INIT_WND_TREE(name,m_hwnd,m_parent,m_dwExStyle,m_lpClassName,m_lpWindowName,\
+m_dwStyle,m_x,m_y,m_nWidth,m_nHeight,m_wChildCnt,m_wMessageNodeCnt,m_pChildList,m_pMessageNodeList)	\
+struct _wnd_tree_t name = {\
+.hwnd = m_hwnd,\
+.dwExStyle = m_dwExStyle,\
+.parent = m_parent,\
+.lpClassName = m_lpClassName,\
+.lpWindowName = m_lpWindowName,\
+.dwStyle = m_dwStyle,\
+.x = m_x,\
+.y = m_y,\
+.nWidth = m_nWidth,\
+.nHeight = m_nHeight,\
+.wChildCnt = m_wChildCnt,\
+.wMessageNodeCnt = m_wMessageNodeCnt,\
+.pChildList = m_pChildList,\
+.pMessageNodeList = m_pMessageNodeList,\
+}
 
 #define INFO_MESSAGE(fmt,args...)   do{TCHAR msg_buf[1024];\
     snprintf(msg_buf,1024,fmt,##args);\
@@ -87,15 +100,25 @@ typedef struct _wnd_tree_t{
 #else
 #define WIN_DEBUG(fmt,args...)
 #endif
-/* Function:
- * Description:
- * Parameter:
- * Return Value:
- * 	success: pointer of wnd_tree_t which just added
- * 	fail:NULL
- * */
 
- /*             interface                */
+
+/*******************      global varibles         ********************/
+extern struct _wnd_tree_t *pWndRoot;
+extern struct _wnd_tree_t *pWndMain;
+extern HWND hwndMain;
+extern HINSTANCE hInst;
+BOOL InitApplication(void);
+extern TCHAR szAppName[];
+
+/*******************      interface         ********************/
+#define DECLARE_HANDLER(name) LRESULT CALLBACK name(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+
+DECLARE_HANDLER(OnSelChange);
+DECLARE_HANDLER(OnNotify);
+DECLARE_HANDLER(OnDestory);
+DECLARE_HANDLER(OnCommand);
+
+
 struct _wnd_tree_t *CopyWndTree(struct _wnd_tree_t *root);
 struct _wnd_tree_t *LinkWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
 struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
