@@ -38,5 +38,5 @@
 #define WIN_COMBO_OFFSET        (10)
 
 #define CBS_PER_LINE            (3)
-
+#define MAX_PATH				256
 #endif

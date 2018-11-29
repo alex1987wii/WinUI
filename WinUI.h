@@ -11,7 +11,7 @@
 #warning "maybe I should add a mutex for WndRoot"
 #warning "I should make dynamic add&del WndTree test when I complete the frame"
 #warning "I have not support Unicode yet,I should do that work after all"
-
+#define WM_INIT		(WM_USER+1)
 
 
 /*for message handler*/
@@ -115,7 +115,6 @@ extern TCHAR szAppName[];
 
 DECLARE_HANDLER(OnSelChange);
 DECLARE_HANDLER(OnNotify);
-DECLARE_HANDLER(OnDestory);
 DECLARE_HANDLER(OnCommand);
 
 
@@ -123,6 +122,6 @@ struct _wnd_tree_t *CopyWndTree(struct _wnd_tree_t *root);
 struct _wnd_tree_t *LinkWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
 struct _wnd_tree_t *AddWndTree(struct _wnd_tree_t *parent,struct _wnd_tree_t *child);
 void DestroyWndTree(struct _wnd_tree_t *root);
-
+struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd);
 BOOL AddMessageHandler(struct _wnd_tree_t *window,message_code_t message_code,message_handler_t message_handler);
 #endif

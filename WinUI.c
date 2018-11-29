@@ -242,7 +242,7 @@ static BOOL CreateWndTree(struct _wnd_tree_t *root,HWND parent)
 }
 
 
-static struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
+struct _wnd_tree_t *GetWnd(struct _wnd_tree_t *window,HWND hwnd)
 {
 	/*we had make some check before invoke*/
 	if(window->hwnd == hwnd)
@@ -280,7 +280,20 @@ LRESULT CALLBACK MainWndProc(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 			}
 		}
 	}
-	return DefWindowProc(hwnd,message,wParam,lParam);
+	switch(message)
+	{
+		case WM_COMMAND:
+		return OnCommand(hwnd,message,wParam,lParam);
+		
+		case WM_NOTIFY:		
+		return OnNotify(hwnd,message,wParam,lParam);
+		case WM_DESTROY:
+		PostQuitMessage(0);
+		break;
+		default:
+		return DefWindowProc(hwnd,message,wParam,lParam);
+	}
+	return 0;
 }
 
 /******************interface for DevTools*************************/
@@ -358,11 +371,7 @@ LRESULT CALLBACK OnNotify(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 	}	
 	return 0;
 }
-LRESULT CALLBACK OnDestory(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
-{	
-	PostQuitMessage(0);
-	return 0;
-}
+
 LRESULT CALLBACK OnSelChange(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
 {	
 	HWND hwndTab = ((LPNMHDR)lParam)->hwndFrom;
@@ -400,12 +409,7 @@ BOOL InitpWndRoot(void)
 		goto error_pWndMain;
 	pWndMain = p_ret;
 	/*add some default message handler,user alse can add message handler for pWndMain in InitApplication*/
-	if(AddMessageHandler(pWndMain,WM_COMMAND,OnCommand) == FALSE)
-		goto error_pWndMain;
-	if(AddMessageHandler(pWndMain,WM_NOTIFY,OnNotify) == FALSE)
-		goto error_pWndMain;
-	if(AddMessageHandler(pWndMain,WM_DESTROY,OnDestory) == FALSE)
-		goto error_pWndMain;
+	
 	return TRUE;
 
 error_pWndMain:
@@ -459,7 +463,6 @@ static BOOL InitMainWindow(void)
 	return TRUE;
 }
 
-#warning "test section"
 
 static DWORD WINAPI DataTransferThread(LPVOID lpParam)
 {
@@ -471,8 +474,9 @@ static DWORD WINAPI DataTransferThread(LPVOID lpParam)
         ResetEvent(g_event);
 		EnableWindow(hwndMain,FALSE);		
 		g_handler(g_hwnd,g_message,g_wParam,g_lParam);
-		EnableWindow(hwndMain,TRUE);		
-    }
+		EnableWindow(hwndMain,TRUE);
+		SetForegroundWindow(hwndMain);
+	}
 
     return 0;
 }
@@ -540,6 +544,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     UpdateWindow(hwndMain);
 	
 
+	PostMessage(hwndMain,WM_INIT,0,0);
 	while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0)
     { 
         if (bRet == -1)

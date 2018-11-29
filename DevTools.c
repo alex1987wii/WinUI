@@ -1,5 +1,32 @@
 #include "DevTools.h"
 struct _wnd_tree_t *InitNandProgramWindow(void);
+static BOOL GetFileName(char *fileName, int size)
+{
+    OPENFILENAME ofn;
+    
+    /* Initialize OPENFILENAME */
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFile = fileName;
+    
+    /* Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+         use the contents of szFile to initialize itself */
+    ofn.lpstrFile[0] = '\0';
+    ofn.nMaxFile = size;
+    ofn.Flags = OFN_PATHMUSTEXIST;
+    
+    return GetOpenFileName(&ofn);
+}
+#warning "testing"
+static LRESULT CALLBACK ButtonBrowseHandler(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam)
+{
+	TCHAR szFile[MAX_PATH];
+	 if(GetFileName(szFile, MAX_PATH) == TRUE)
+	 {
+		WIN_DEBUG("get button_browse click!");
+	 }
+	 return 0;
+}
 BOOL InitApplication(void)
 {
 	/* Initialize tab controls */
@@ -115,7 +142,7 @@ struct _wnd_tree_t *InitNandProgramWindow(void)
 		return NULL;
 	if(AddWndTree(pProgramPage,&NpEditSrcFile) == NULL)
 		return NULL;
-	if(AddWndTree(pProgramPage,&NpButtonBrowse) == NULL)
+	if(AddMessageHandler(AddWndTree(pProgramPage,&NpButtonBrowse),BN_CLICKED,ButtonBrowseHandler) == FALSE)
 		return NULL;
 	if(AddWndTree(pProgramPage,&NpBatchProgram) == NULL)
 		return NULL;
@@ -127,3 +154,5 @@ struct _wnd_tree_t *InitNandProgramWindow(void)
 		return NULL;
 	return pProgramPage;
 }
+
+
